@@ -4,3 +4,4 @@ plotly
 matplotlib
 numpy
 openpyxl
+streamlit-option-menu
