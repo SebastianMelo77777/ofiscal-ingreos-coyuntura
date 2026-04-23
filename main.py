@@ -1064,7 +1064,6 @@ elif menu == "Coyuntura":
                 st.dataframe(tabla_consolidada[tabla_consolidada['Entidad'] == entidad_sel], use_container_width=True)
 
 
-
  ##treemap
 elif menu == "Treemap":
            
