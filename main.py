@@ -6,6 +6,8 @@ import plotly.express as px
 from pathlib import Path
 from streamlit_option_menu import option_menu
 import plotly.graph_objects as go
+from io import BytesIO
+import openpyxl  # pip install openpyxl
 
 
 st.set_page_config(layout="wide")
@@ -717,507 +719,835 @@ elif  menu=="Gastos":
     st.header("Gastos")
 
 # =============================================================================
-# Coyuntura 
+# COYUNTURA  — reemplazo de la sección elif menu == "Coyuntura"
 # =============================================================================
 
 elif menu == "Coyuntura":
     st.header("Coyuntura - Ejecución Presupuestal Territorial")
-    
-    # Menú horizontal con pestañas (estilo profesional)
-    tab_ing, tab_gas = st.tabs(["Ingresos 2025", "Gastos 2025"])
-    
-    with tab_ing:
 
-        # ====================== CARGA DE DATOS ======================
-        base_dir = Path(__file__).parent
-        ejec_path = base_dir / "eje_ing_clean25.xlsx"
-        prog_path = base_dir / "pro_ing_clean25.xlsx"
-            
-    @st.cache_data
-    def cargar_datos():
-        df_ejec = pd.read_excel(ejec_path)
-        df_prog = pd.read_excel(prog_path)
-        return df_ejec, df_prog
+    DATOS_LISTOS = False  # ← cambiar a True cuando el CIFFIT actualice
 
-    df_ejec, df_prog = cargar_datos()
+    if not DATOS_LISTOS:
+        st.info(" Esperando actualización del CIFFIT.")
+    else:
 
-    # Limpieza
-    for df in [df_ejec, df_prog]:
-        df['Entidad'] = df['Entidad'].astype(str).str.strip()
-        df['Tipo de Entidad'] = df['Tipo de Entidad'].astype(str).str.strip()
-        df['Departamento'] = df['Departamento'].astype(str).str.strip()
+        tab_ing, tab_gas = st.tabs(["Ingresos 2025", "Gastos 2025"])
 
-    # ====================== TOTAL POR ENTIDAD ======================
-    group_cols = ['Entidad', 'Tipo de Entidad', 'Departamento']
-    ejec_agg2 = (df_ejec.groupby(group_cols, as_index=False)['Total Recaudo'].sum().rename(columns={'Total Recaudo': 'Total_Ejecutado'}))
-    prog_agg2 = (df_prog.groupby(group_cols, as_index=False)['Presupuesto Definitivo'].sum().rename(columns={'Presupuesto Definitivo': 'Total_Programado'}))
-    tabla_consolidada = pd.merge(prog_agg2, ejec_agg2, on=group_cols, how='left')
-    tabla_consolidada['Total_Ejecutado'] = tabla_consolidada['Total_Ejecutado'].fillna(0)
-    tabla_consolidada['Tasa_Ejecución (%)'] = ((tabla_consolidada['Total_Ejecutado'] / tabla_consolidada['Total_Programado']) * 100).round(2).fillna(0)
-
-    # ====================== TOTALES GENERALES ======================
-    total_gen  = tabla_consolidada.agg({'Total_Programado': 'sum', 'Total_Ejecutado': 'sum'})
-    total_dept = tabla_consolidada[tabla_consolidada['Tipo de Entidad'] == "Departamento"].agg({'Total_Programado': 'sum', 'Total_Ejecutado': 'sum'})
-    total_mun  = tabla_consolidada[tabla_consolidada['Tipo de Entidad'] == "Municipio"].agg({'Total_Programado': 'sum', 'Total_Ejecutado': 'sum'})
-
-    tasa_gen  = (total_gen['Total_Ejecutado'] / total_gen['Total_Programado'] * 100).round(2) if total_gen['Total_Programado'] > 0 else 0
-    tasa_dept = (total_dept['Total_Ejecutado'] / total_dept['Total_Programado'] * 100).round(2) if total_dept['Total_Programado'] > 0 else 0
-    tasa_mun  = (total_mun['Total_Ejecutado'] / total_mun['Total_Programado'] * 100).round(2) if total_mun['Total_Programado'] > 0 else 0
-
-    # ====================== DETALLE CLAS_GEN2 ======================
-    detailed_group = ['Entidad', 'Tipo de Entidad', 'Departamento', 'clas_gen2']
-    ejec_detail = (df_ejec.groupby(detailed_group, as_index=False)['Total Recaudo'].sum().rename(columns={'Total Recaudo': 'Total_Ejecutado'}))
-    prog_detail = (df_prog.groupby(detailed_group, as_index=False)['Presupuesto Definitivo'].sum().rename(columns={'Presupuesto Definitivo': 'Total_Programado'}))
-    detail_consolidada = pd.merge(prog_detail, ejec_detail, on=detailed_group, how='left')
-    detail_consolidada['Total_Ejecutado'] = detail_consolidada['Total_Ejecutado'].fillna(0)
-    detail_consolidada['Tasa_Ejecución (%)'] = ((detail_consolidada['Total_Ejecutado'] / detail_consolidada['Total_Programado']) * 100).round(2).fillna(0)
-
-    # ====================== DETALLE CLAS_OFPUJ (CORREGIDO) ======================
-    ofpuj_group = ['Entidad', 'Tipo de Entidad', 'Departamento', 'clas_ofpuj']
-    ejec_ofpuj = (df_ejec.groupby(ofpuj_group, as_index=False)['Total Recaudo'].sum().rename(columns={'Total Recaudo': 'Total_Ejecutado'}))
-    prog_ofpuj = (df_prog.groupby(ofpuj_group, as_index=False)['Presupuesto Definitivo'].sum().rename(columns={'Presupuesto Definitivo': 'Total_Programado'}))
-    ofpuj_consolidada = pd.merge(prog_ofpuj, ejec_ofpuj, on=ofpuj_group, how='left')
-    ofpuj_consolidada['Total_Ejecutado'] = ofpuj_consolidada['Total_Ejecutado'].fillna(0)
-    ofpuj_consolidada['Tasa_Ejecución (%)'] = ((ofpuj_consolidada['Total_Ejecutado'] / ofpuj_consolidada['Total_Programado']) * 100).round(2).fillna(0)
-
-    # ====================== HELPERS ======================
-    def fmt_cop(n):
-        if n >= 1e12: return f"${n/1e12:.2f} B"
-        if n >= 1e9: return f"${n/1e9:.1f} MM"
-        return f"${n/1e6:.0f} M"
-
-    def tarjeta_metrica(label, valor_cop, color_valor):
-        return f"""
-        <div style="background:#F1EFE8; border-radius:12px; padding:14px 18px; margin-bottom:10px; border-left:4px solid {color_valor};">
-            <div style="font-size:11px; font-weight:600; color:#888780; letter-spacing:.06em; text-transform:uppercase; margin-bottom:4px;">{label}</div>
-            <div style="font-size:22px; font-weight:600; color:{color_valor}; font-family:'Inter',sans-serif;">{valor_cop}</div>
-        </div>
-        """
-
-    COLOR_CLAS = {"Recursos propios": "#185FA5", "Transferencias": "#0F6E56", "Recursos de capital": "#BA7517"}
-    COLOR_POR_IMPUESTO = {
-        "Estampillas": "#534AB7",
-        "Sobretasa a la gasolina": "#0F6E56",
-        "Impuesto predial unificado": "#185FA5",
-        "Impuesto de industria y comercio": "#BA7517"
-    }
-
-    tab1, tab2, tab3 = st.tabs(["General", "Departamental", "Municipal"])
-
-# ====================== TAB GENERAL ======================
-    with tab1:
-        st.subheader("Ejecución Acumulada General")
-        col1, col2, col3 = st.columns(3)
-
-        # Total General
-        with col1:
-            tasa = tasa_gen
-            prog = total_gen['Total_Programado']
-            ejec = total_gen['Total_Ejecutado']
-            st.metric("**Total General**", f"{tasa:.1f}%", f"{fmt_cop(ejec)} / {fmt_cop(prog)}")
-            fig_gen = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=tasa,
-                number={"suffix": "%", "font": {"size": 52, "color": "#1a1a2e"}},
-                gauge={"axis": {"range": [0, 100]}, "bar": {"color": "#185FA5", "thickness": 0.28},
-                    "steps": [{"range": [0, 40], "color": "#FCEBEB"}, {"range": [40, 70], "color": "#FAEEDA"}, {"range": [70, 100], "color": "#EAF3DE"}]},
-                title={"text": "Nacional"}
-            ))
-            st.plotly_chart(fig_gen, use_container_width=True, config={"displayModeBar": False})
-            st.caption("**Ejecutado / Programado**")
-            st.divider()
-
-
-            # Diferencia solicitada
-            if tasa > 100:
-                sob = tasa - 100
-                mon = ejec - prog
-                st.metric("**Sobreejecución**", f"+{sob:.1f}%", f"+{fmt_cop(mon)}", delta_color="normal")
-            else:
-                falta = 100 - tasa
-                mon_falta = prog - ejec
-                st.metric("**Falta por ejecutar**", f"{falta:.1f}%", f"{fmt_cop(mon_falta)} restantes", delta_color="inverse")
-
-        # Departamentos
-        with col2:
-            tasa = tasa_dept
-            prog = total_dept['Total_Programado']
-            ejec = total_dept['Total_Ejecutado']
-            st.metric("**Departamentos**", f"{tasa:.1f}%", f"{fmt_cop(ejec)} / {fmt_cop(prog)}")
-            fig_dep = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=tasa,
-                number={"suffix": "%", "font": {"size": 52, "color": "#1a1a2e"}},
-                gauge={"axis": {"range": [0, 100]}, "bar": {"color": "#185FA5", "thickness": 0.28},
-                    "steps": [{"range": [0, 40], "color": "#FCEBEB"}, {"range": [40, 70], "color": "#FAEEDA"}, {"range": [70, 100], "color": "#EAF3DE"}]},
-                title={"text": "Todos los Departamentos"}
-            ))
-            st.plotly_chart(fig_dep, use_container_width=True, config={"displayModeBar": False})
-            st.caption("**Ejecutado / Programado**")
-            st.divider()
-
-
-            if tasa > 100:
-                sob = tasa - 100
-                mon = ejec - prog
-                st.metric("**Sobreejecución**", f"+{sob:.1f}%", f"+{fmt_cop(mon)}", delta_color="normal")
-            else:
-                falta = 100 - tasa
-                mon_falta = prog - ejec
-                st.metric("**Falta por ejecutar**", f"{falta:.1f}%", f"{fmt_cop(mon_falta)} restantes", delta_color="inverse")
-
-        # Municipios
-        with col3:
-            tasa = tasa_mun
-            prog = total_mun['Total_Programado']
-            ejec = total_mun['Total_Ejecutado']
-            st.metric("**Municipios**", f"{tasa:.1f}%", f"{fmt_cop(ejec)} / {fmt_cop(prog)}")
-            fig_mun = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=tasa,
-                number={"suffix": "%", "font": {"size": 52, "color": "#1a1a2e"}},
-                gauge={"axis": {"range": [0, 100]}, "bar": {"color": "#185FA5", "thickness": 0.28},
-                    "steps": [{"range": [0, 40], "color": "#FCEBEB"}, {"range": [40, 70], "color": "#FAEEDA"}, {"range": [70, 100], "color": "#EAF3DE"}]},
-                title={"text": "Todos los Municipios"}
-            ))
-            st.plotly_chart(fig_mun, use_container_width=True, config={"displayModeBar": False})
-            st.caption("**Ejecutado / Programado**")
-            st.divider()
-
-
-            if tasa > 100:
-                sob = tasa - 100
-                mon = ejec - prog
-                st.metric("**Sobreejecución**", f"+{sob:.1f}%", f"+{fmt_cop(mon)}", delta_color="normal")
-            else:
-                falta = 100 - tasa
-                mon_falta = prog - ejec
-                st.metric("**Falta por ejecutar**", f"{falta:.1f}%", f"{fmt_cop(mon_falta)} restantes", delta_color="inverse")
-
-    # ====================== TAB DEPARTAMENTAL ======================
-    with tab2:
-        st.subheader("Nivel Departamental")
-        df_dep = tabla_consolidada[tabla_consolidada['Tipo de Entidad'] == "Departamento"].copy()
-        if not df_dep.empty:
-            entidad_sel = st.selectbox("Selecciona Departamento", sorted(df_dep['Entidad'].unique()), key="dep_sel")
-            df_e = df_dep[df_dep['Entidad'] == entidad_sel].iloc[0]
-            tasa = df_e['Tasa_Ejecución (%)']
-            prog = df_e['Total_Programado']
-            ejec = df_e['Total_Ejecutado']
-
-            # ZONA 1
-            col_gauge, col_metrics = st.columns([1.4, 1])
-            with col_gauge:
-                fig = go.Figure(go.Indicator(
-                    mode="gauge+number",
-                    value=tasa,
-                    number={"suffix": "%", "font": {"size": 52, "color": "#1a1a2e", "family": "Inter, sans-serif"}},
-                    gauge={"axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "#888780", "tickfont": {"size": 11}, "dtick": 20},
-                        "bar": {"color": "#185FA5", "thickness": 0.28},
-                        "bgcolor": "white", "borderwidth": 0,
-                        "steps": [{"range": [0, 40], "color": "#FCEBEB"}, {"range": [40, 70], "color": "#FAEEDA"}, {"range": [70, 100], "color": "#EAF3DE"}],
-                        "threshold": {"line": {"color": "#D85A30", "width": 3}, "thickness": 0.85, "value": 58.3}},
-                    title={"text": f"Tasa de ejecución total<br><span style='font-size:13px;color:#888780'>Acumulado 2025 · {entidad_sel}</span>", "font": {"size": 17, "color": "#1a1a2e", "family": "Inter, sans-serif"}}
-                ))
-                fig.update_layout(height=280, margin=dict(t=60, b=10, l=20, r=20), paper_bgcolor="white", font_family="Inter, sans-serif")
-                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-
-                st.caption("**Ejecutado / Programado**")
-
-            with col_metrics:
-                st.markdown(tarjeta_metrica("Programado", fmt_cop(prog), "#185FA5"), unsafe_allow_html=True)
-                st.markdown(tarjeta_metrica("Ejecutado", fmt_cop(ejec), "#1D9E75"), unsafe_allow_html=True)
-                st.markdown(tarjeta_metrica("Rezago", fmt_cop(prog - ejec), "#D85A30"), unsafe_allow_html=True)
-
-            st.divider()
-
-            # ZONA 2
-            col_clas, col_imp = st.columns([1, 1])
-            with col_clas:
-                st.markdown("### Ejecución por Clasificación (clas_gen2)")
-                opciones_clas = ['Recursos propios', 'Transferencias', 'Recursos de capital']
-                seleccion_clas = st.multiselect("Selecciona qué clasificaciones mostrar", opciones_clas, default=opciones_clas, key="clas_dep")
-                for clas in seleccion_clas:
-                    df_clas = detail_consolidada[(detail_consolidada['Entidad'] == entidad_sel) & (detail_consolidada['clas_gen2'] == clas)].copy()
-                    if not df_clas.empty:
-                        prog_clas = df_clas['Total_Programado'].sum()
-                        ejec_clas = df_clas['Total_Ejecutado'].sum()
-                        tasa_clas = (ejec_clas / prog_clas * 100).round(2) if prog_clas > 0 else 0
-                        st.markdown(f"**{clas}** — {tasa_clas:.1f}%")
-                        st.progress(min(tasa_clas / 100, 1.0))
-                        st.caption(f"Ejecutado: {fmt_cop(ejec_clas)} / {fmt_cop(prog_clas)}")
-                        st.markdown("---")
-
-            with col_imp:
-                st.markdown("### Impuestos Principales")
-                opciones_imp_dep = ["Estampillas", "Sobretasa a la gasolina"]
-                seleccion_imp = st.multiselect("Selecciona qué impuestos mostrar", opciones_imp_dep, default=opciones_imp_dep, key="imp_dep")
-                cols_imp = st.columns(len(seleccion_imp))
-                for i, imp in enumerate(seleccion_imp):
-                    mask = ofpuj_consolidada['clas_ofpuj'].str.contains(imp, case=False, na=False)
-                    df_imp = ofpuj_consolidada[(ofpuj_consolidada['Entidad'] == entidad_sel) & mask].copy()
-                    if not df_imp.empty:
-                        prog_imp = df_imp['Total_Programado'].sum()
-                        ejec_imp = df_imp['Total_Ejecutado'].sum()
-                        tasa_imp = (ejec_imp / prog_imp * 100).round(2) if prog_imp > 0 else 0
-                        with cols_imp[i]:
-                            fig_mini = go.Figure(go.Indicator(
-                                mode="gauge+number",
-                                value=tasa_imp,
-                                number={"suffix": "%", "font": {"size": 28, "color": "#1a1a2e"}},
-                                gauge={"axis": {"range": [0, 100], "visible": False}, "bar": {"color": COLOR_POR_IMPUESTO.get(imp, "#185FA5"), "thickness": 0.3}, "bgcolor": "#F1EFE8", "borderwidth": 0},
-                                title={"text": imp, "font": {"size": 13, "color": "#5F5E5A"}}
-                            ))
-                            fig_mini.update_layout(height=180, margin=dict(t=40, b=20, l=10, r=10), paper_bgcolor="white")
-                            st.plotly_chart(fig_mini, use_container_width=True, config={"displayModeBar": False})
-                            st.caption(f"{fmt_cop(ejec_imp)} / {fmt_cop(prog_imp)}")
-
-            st.divider()
-
-            with st.expander("Ver tabla de detalle completa"):
-                st.dataframe(tabla_consolidada[tabla_consolidada['Entidad'] == entidad_sel], use_container_width=True)
-
-    # ====================== TAB MUNICIPAL ======================
-    with tab3:
-        st.subheader("Nivel Municipal")
-        df_mun = tabla_consolidada[tabla_consolidada['Tipo de Entidad'] == "Municipio"].copy()
-        if not df_mun.empty:
-            departamentos = sorted(df_mun['Departamento'].unique())
-            depto_sel = st.selectbox("Selecciona un Departamento", departamentos, key="mun_depto_sel")
-            municipios_filtrados = sorted(df_mun[df_mun['Departamento'] == depto_sel]['Entidad'].unique())
-            entidad_sel = st.selectbox("Selecciona un Municipio", municipios_filtrados, key="mun_sel")
-            df_e = df_mun[df_mun['Entidad'] == entidad_sel].iloc[0]
-            tasa = df_e['Tasa_Ejecución (%)']
-            prog = df_e['Total_Programado']
-            ejec = df_e['Total_Ejecutado']
-
-            # ZONA 1
-            col_gauge, col_metrics = st.columns([1.4, 1])
-            with col_gauge:
-                fig = go.Figure(go.Indicator(
-                    mode="gauge+number",
-                    value=tasa,
-                    number={"suffix": "%", "font": {"size": 52, "color": "#1a1a2e", "family": "Inter, sans-serif"}},
-                    gauge={"axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "#888780", "tickfont": {"size": 11}, "dtick": 20},
-                        "bar": {"color": "#185FA5", "thickness": 0.28},
-                        "bgcolor": "white", "borderwidth": 0,
-                        "steps": [{"range": [0, 40], "color": "#FCEBEB"}, {"range": [40, 70], "color": "#FAEEDA"}, {"range": [70, 100], "color": "#EAF3DE"}],
-                        "threshold": {"line": {"color": "#D85A30", "width": 3}, "thickness": 0.85, "value": 58.3}},
-                    title={"text": f"Tasa de ejecución total<br><span style='font-size:13px;color:#888780'>Acumulado 2025 · {entidad_sel}</span>", "font": {"size": 17, "color": "#1a1a2e", "family": "Inter, sans-serif"}}
-                ))
-                fig.update_layout(height=280, margin=dict(t=60, b=10, l=20, r=20), paper_bgcolor="white", font_family="Inter, sans-serif")
-                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-
-            with col_metrics:
-                st.markdown(tarjeta_metrica("Programado", fmt_cop(prog), "#185FA5"), unsafe_allow_html=True)
-                st.markdown(tarjeta_metrica("Ejecutado", fmt_cop(ejec), "#1D9E75"), unsafe_allow_html=True)
-                st.markdown(tarjeta_metrica("Rezago", fmt_cop(prog - ejec), "#D85A30"), unsafe_allow_html=True)
-                st.caption("**Ejecutado / Programado**")
-
-
-            st.divider()
-
-            # ZONA 2
-            col_clas, col_imp = st.columns([1, 1])
-            with col_clas:
-                st.markdown("### Ejecución por Clasificación (clas_gen2)")
-                opciones_clas = ['Recursos propios', 'Transferencias', 'Recursos de capital']
-                seleccion_clas = st.multiselect("Selecciona qué clasificaciones mostrar", opciones_clas, default=opciones_clas, key="clas_mun")
-                for clas in seleccion_clas:
-                    df_clas = detail_consolidada[(detail_consolidada['Entidad'] == entidad_sel) & (detail_consolidada['clas_gen2'] == clas)].copy()
-                    if not df_clas.empty:
-                        prog_clas = df_clas['Total_Programado'].sum()
-                        ejec_clas = df_clas['Total_Ejecutado'].sum()
-                        tasa_clas = (ejec_clas / prog_clas * 100).round(2) if prog_clas > 0 else 0
-                        st.markdown(f"**{clas}** — {tasa_clas:.1f}%")
-                        st.progress(min(tasa_clas / 100, 1.0))
-                        st.caption(f"Ejecutado: {fmt_cop(ejec_clas)} / {fmt_cop(prog_clas)}")
-                        st.markdown("---")
-
-            with col_imp:
-                st.markdown("### Impuestos Principales")
-                opciones_imp_mun = ["Impuesto predial unificado", "Impuesto de industria y comercio", "Sobretasa a la gasolina", "Estampillas"]
-                seleccion_imp = st.multiselect("Selecciona qué impuestos mostrar", opciones_imp_mun, default=opciones_imp_mun, key="imp_mun")
-                cols_imp = st.columns(len(seleccion_imp))
-                for i, imp in enumerate(seleccion_imp):
-                    if "predial" in imp.lower():
-                        mask = ofpuj_consolidada['clas_ofpuj'].str.contains("predial", case=False, na=False)
-                    elif "industria" in imp.lower() or "comercio" in imp.lower():
-                        mask = ofpuj_consolidada['clas_ofpuj'].str.contains("industria|comercio|ICA", case=False, na=False)
-                    else:
-                        mask = ofpuj_consolidada['clas_ofpuj'].str.contains(imp, case=False, na=False)
-                    df_imp = ofpuj_consolidada[(ofpuj_consolidada['Entidad'] == entidad_sel) & mask].copy()
-                    if not df_imp.empty:
-                        prog_imp = df_imp['Total_Programado'].sum()
-                        ejec_imp = df_imp['Total_Ejecutado'].sum()
-                        tasa_imp = (ejec_imp / prog_imp * 100).round(2) if prog_imp > 0 else 0
-                        with cols_imp[i]:
-                            fig_mini = go.Figure(go.Indicator(
-                                mode="gauge+number",
-                                value=tasa_imp,
-                                number={"suffix": "%", "font": {"size": 28, "color": "#1a1a2e"}},
-                                gauge={"axis": {"range": [0, 100], "visible": False}, "bar": {"color": COLOR_POR_IMPUESTO.get(imp, "#185FA5"), "thickness": 0.3}, "bgcolor": "#F1EFE8", "borderwidth": 0},
-                                title={"text": imp, "font": {"size": 13, "color": "#5F5E5A"}}
-                            ))
-                            fig_mini.update_layout(height=180, margin=dict(t=40, b=5, l=10, r=10), paper_bgcolor="white")
-                            st.plotly_chart(fig_mini, use_container_width=True, config={"displayModeBar": False})
-                            st.caption(f"{fmt_cop(ejec_imp)} / {fmt_cop(prog_imp)}")
-
-            st.divider()
-
-            with st.expander("Ver tabla de detalle completa"):
-                st.dataframe(tabla_consolidada[tabla_consolidada['Entidad'] == entidad_sel], use_container_width=True)
-
-
-    with tab_gas:
-
-        # COYUNTURA GASTOS 2025 
-        # =============================================================================
-
-        st.header("Coyuntura de Gastos 2025")
-        st.subheader("Ejecución Presupuestal Territorial – Gastos")
-        st.caption("Fuente: Ejecución y Programación 2025 | Observatorio Fiscal Javeriana")
-
-        # ====================== CARGA DE DATOS ======================
-        base_dir = Path(__file__).parent
-        ejec_path = base_dir / "eje_gast_clean25.xlsx"
-        prog_path = base_dir / "pro_gast_clean25.xlsx"
-        
-        @st.cache_data
-        def cargar_datos():
-            df_ejec_g = pd.read_excel(ejec_path)
-            df_prog_g = pd.read_excel(prog_path)
-            return df_ejec_g, df_prog_g
-
-        df_ejec_g, df_prog_g = cargar_datos()
-
-        # ====================== Limpieza ======================
-        for df in [df_ejec_g, df_prog_g]:
-            df['Entidad'] = df['Entidad'].astype(str).str.strip()
-            df['Tipo de Entidad'] = df['Tipo de Entidad'].astype(str).str.strip()
-            df['Departamento'] = df['Departamento'].astype(str).str.strip()
-
-        # ====================== AGREGACIÓN BÁSICA ======================
-        group_cols = ['Entidad', 'Tipo de Entidad', 'Departamento']
-        
-        ejec_agg_g = (df_ejec_g.groupby(group_cols, as_index=False)['Obligaciones']
-                    .sum()
-                    .rename(columns={'Obligaciones': 'Total_Ejecutado'}))
-        
-        prog_agg_g = (df_prog_g.groupby(group_cols, as_index=False)['Apropiación Definitiva']
-                    .sum()
-                    .rename(columns={'Apropiación Definitiva': 'Total_Programado'}))
-        
-        tabla_consolidada = pd.merge(prog_agg_g, ejec_agg_g, on=group_cols, how='left')
-        tabla_consolidada['Total_Ejecutado'] = tabla_consolidada['Total_Ejecutado'].fillna(0)
-        tabla_consolidada['Tasa_Ejecución (%)'] = ((tabla_consolidada['Total_Ejecutado'] / tabla_consolidada['Total_Programado']) * 100).round(2).fillna(0)
-
-        # ====================== TOTALES GENERALES ======================
-        total_gen  = tabla_consolidada.agg({'Total_Programado': 'sum', 'Total_Ejecutado': 'sum'})
-        total_dept = tabla_consolidada[tabla_consolidada['Tipo de Entidad'] == "Departamento"].agg({'Total_Programado': 'sum', 'Total_Ejecutado': 'sum'})
-        total_mun  = tabla_consolidada[tabla_consolidada['Tipo de Entidad'] == "Municipio"].agg({'Total_Programado': 'sum', 'Total_Ejecutado': 'sum'})
-
-        tasa_gen  = (total_gen['Total_Ejecutado'] / total_gen['Total_Programado'] * 100).round(2) if total_gen['Total_Programado'] > 0 else 0
-        tasa_dept = (total_dept['Total_Ejecutado'] / total_dept['Total_Programado'] * 100).round(2) if total_dept['Total_Programado'] > 0 else 0
-        tasa_mun  = (total_mun['Total_Ejecutado'] / total_mun['Total_Programado'] * 100).round(2) if total_mun['Total_Programado'] > 0 else 0
-
-        # ====================== HELPERS ======================
+        # =========================================================================
+        # HELPERS COMPARTIDOS
+        # =========================================================================
         def fmt_cop(n):
             if n >= 1e12: return f"${n/1e12:.2f} B"
-            if n >= 1e9: return f"${n/1e9:.1f} MM"
+            if n >= 1e9:  return f"${n/1e9:.1f} MM"
             return f"${n/1e6:.0f} M"
 
-        # ====================== PESTAÑAS ======================
-        tab1, tab2, tab3 = st.tabs(["General", "Departamental", "Municipal"])
+        def tarjeta_metrica(label, valor_cop, color_valor):
+            return f"""
+            <div style="background:#F1EFE8; border-radius:12px; padding:14px 18px;
+                        margin-bottom:10px; border-left:4px solid {color_valor};">
+                <div style="font-size:11px; font-weight:600; color:#888780;
+                            letter-spacing:.06em; text-transform:uppercase;
+                            margin-bottom:4px;">{label}</div>
+                <div style="font-size:22px; font-weight:600; color:{color_valor};
+                            font-family:'Inter',sans-serif;">{valor_cop}</div>
+            </div>
+            """
 
-        # ====================== TAB GENERAL ======================
-        with tab1:
-            st.subheader("Ejecución Acumulada General de Gastos")
-            col1, col2, col3 = st.columns(3)
+        # Paleta de colores por clasificación e impuesto
+        COLOR_CLAS = {
+            "Recursos propios":    "#185FA5",
+            "Transferencias":      "#0F6E56",
+            "Recursos de capital": "#BA7517",
+        }
+        COLOR_IMP = {
+            "Estampillas":                          "#534AB7",
+            "Sobretasa a la gasolina":              "#0F6E56",
+            "Impuesto predial unificado":           "#185FA5",
+            "Impuesto de industria y comercio":     "#BA7517",
+        }
 
-            for col, tasa, total, titulo in zip([col1, col2, col3], 
-                                            [tasa_gen, tasa_dept, tasa_mun],
-                                            [total_gen, total_dept, total_mun],
-                                            ["General", "Departamentos", "Municipios"]):
-                with col:
-                    st.metric(f"**{titulo}**", f"{tasa:.1f}%", f"{fmt_cop(total['Total_Ejecutado'])} / {fmt_cop(total['Total_Programado'])}")
-                    
-                    fig = go.Figure(go.Indicator(
-                        mode="gauge+number",
-                        value=tasa,
-                        number={"suffix": "%", "font": {"size": 52}},
-                        gauge={
-                            "axis": {"range": [0, 100]},
-                            "bar": {"color": "#185FA5", "thickness": 0.3},
-                            "steps": [
-                                {"range": [0, 40], "color": "#FCEBEB"},
-                                {"range": [40, 70], "color": "#FAEEDA"},
-                                {"range": [70, 100], "color": "#EAF3DE"}
-                            ]
-                        }
-                    ))
-                    st.plotly_chart(fig, use_container_width=True)
-                    st.caption("**Obligaciones / Apropiación Definitiva**")
+        # -------------------------------------------------------------------------
+        # Función reutilizable: gauge limpio sin fondo blanco
+        # -------------------------------------------------------------------------
+        def make_gauge(value, title_text, subtitle="", color="#185FA5",
+                    height=280, font_size=52, show_threshold=False, threshold_val=58.3):
+            steps  = [
+                {"range": [0,  40], "color": "#FCEBEB"},
+                {"range": [40, 70], "color": "#FAEEDA"},
+                {"range": [70,100], "color": "#EAF3DE"},
+            ]
+            gauge_cfg = {
+                "axis":        {"range": [0, 100], "tickwidth": 1,
+                                "tickcolor": "#888780", "tickfont": {"size": 11}, "dtick": 20},
+                "bar":         {"color": color, "thickness": 0.28},
+                "bgcolor":     "rgba(0,0,0,0)",   # fondo interno transparente
+                "borderwidth": 0,
+                "steps":       steps,
+            }
+            if show_threshold:
+                gauge_cfg["threshold"] = {
+                    "line": {"color": "#D85A30", "width": 3},
+                    "thickness": 0.85,
+                    "value": threshold_val,
+                }
+            full_title = (
+                f"{title_text}<br>"
+                f"<span style='font-size:13px;color:#888780'>{subtitle}</span>"
+                if subtitle else title_text
+            )
+            fig = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=value,
+                number={"suffix": "%", "font": {"size": font_size, "color": "#1a1a2e",
+                                                "family": "Inter, sans-serif"}},
+                gauge=gauge_cfg,
+                title={"text": full_title,
+                    "font": {"size": 17, "color": "#1a1a2e", "family": "Inter, sans-serif"}},
+            ))
+            fig.update_layout(
+                height=height,
+                margin=dict(t=60, b=10, l=20, r=20),
+                paper_bgcolor="rgba(0,0,0,0)",   # ← sin fondo blanco
+                plot_bgcolor ="rgba(0,0,0,0)",
+                font_family="Inter, sans-serif",
+            )
+            return fig
 
-        # ====================== TAB DEPARTAMENTAL ======================
-        with tab2:
-            st.subheader("Nivel Departamental")
-            df_dep = tabla_consolidada[tabla_consolidada['Tipo de Entidad'] == "Departamento"].copy()
-            if not df_dep.empty:
-                entidad_sel = st.selectbox("Selecciona Departamento", sorted(df_dep['Entidad'].unique()), key="gasto_dep_sel")
-                row = df_dep[df_dep['Entidad'] == entidad_sel].iloc[0]
-                
-                col_gauge, col_info = st.columns([1.4, 1])
-                with col_gauge:
-                    fig = go.Figure(go.Indicator(
-                        mode="gauge+number",
-                        value=row['Tasa_Ejecución (%)'],
-                        number={"suffix": "%", "font": {"size": 52}},
-                        gauge={"axis": {"range": [0, 100]}, "bar": {"color": "#185FA5"}}
-                    ))
-                    st.plotly_chart(fig, use_container_width=True)
-                
-                with col_info:
-                    st.metric("Programado", fmt_cop(row['Total_Programado']), delta=None)
-                    st.metric("Ejecutado (Obligaciones)", fmt_cop(row['Total_Ejecutado']), delta=None)
-                    st.metric("Por Ejecutar", fmt_cop(row['Total_Programado'] - row['Total_Ejecutado']), delta=None)
+        # =========================================================================
+        # TAB INGRESOS 2025
+        # =========================================================================
+        with tab_ing:
 
-        # ====================== TAB MUNICIPAL ======================
-        with tab3:
-            st.subheader("Nivel Municipal")
-            df_mun = tabla_consolidada[tabla_consolidada['Tipo de Entidad'] == "Municipio"].copy()
-            if not df_mun.empty:
-                depto_sel = st.selectbox("Selecciona Departamento", sorted(df_mun['Departamento'].unique()), key="gasto_mun_depto")
-                mun_filtrados = sorted(df_mun[df_mun['Departamento'] == depto_sel]['Entidad'].unique())
-                entidad_sel = st.selectbox("Selecciona Municipio", mun_filtrados, key="gasto_mun_sel")
-                
-                row = df_mun[df_mun['Entidad'] == entidad_sel].iloc[0]
-                
-                col_gauge, col_info = st.columns([1.4, 1])
-                with col_gauge:
-                    fig = go.Figure(go.Indicator(
-                        mode="gauge+number",
-                        value=row['Tasa_Ejecución (%)'],
-                        number={"suffix": "%", "font": {"size": 52}},
-                        gauge={"axis": {"range": [0, 100]}, "bar": {"color": "#185FA5"}}
-                    ))
-                    st.plotly_chart(fig, use_container_width=True)
-                
-                with col_info:
-                    st.metric("Programado", fmt_cop(row['Total_Programado']))
-                    st.metric("Ejecutado (Obligaciones)", fmt_cop(row['Total_Ejecutado']))
-                    st.metric("Por Ejecutar", fmt_cop(row['Total_Programado'] - row['Total_Ejecutado']))
+            # ----- Carga de datos ------------------------------------------------
+            base_dir  = Path(__file__).parent
+            ejec_path = base_dir / "eje_ing_clean25.xlsx"
+            prog_path = base_dir / "pro_ing_clean25.xlsx"
+
+            @st.cache_data
+            def cargar_ingresos():
+                df_e = pd.read_excel(ejec_path)
+                df_p = pd.read_excel(prog_path)
+                for df in [df_e, df_p]:
+                    df["Entidad"]         = df["Entidad"].astype(str).str.strip()
+                    df["Tipo de Entidad"] = df["Tipo de Entidad"].astype(str).str.strip()
+                    df["Departamento"]    = df["Departamento"].astype(str).str.strip()
+                return df_e, df_p
+
+            df_ejec, df_prog = cargar_ingresos()
+
+            # ----- Consolidado por entidad ---------------------------------------
+            group_cols = ["Entidad", "Tipo de Entidad", "Departamento"]
+
+            ejec_agg = (df_ejec.groupby(group_cols, as_index=False)["Total Recaudo"]
+                            .sum().rename(columns={"Total Recaudo": "Total_Ejecutado"}))
+            prog_agg = (df_prog.groupby(group_cols, as_index=False)["Presupuesto Definitivo"]
+                            .sum().rename(columns={"Presupuesto Definitivo": "Total_Programado"}))
+
+            tabla = pd.merge(prog_agg, ejec_agg, on=group_cols, how="left")
+            tabla["Total_Ejecutado"]   = tabla["Total_Ejecutado"].fillna(0)
+            tabla["Tasa_Ejecución (%)"]= ((tabla["Total_Ejecutado"] / tabla["Total_Programado"]) * 100).round(2).fillna(0)
+
+            # ----- Consolidado por clas_gen2 (clasificación) --------------------
+            det_cols = group_cols + ["clas_gen2"]
+            ejec_det = (df_ejec.groupby(det_cols, as_index=False)["Total Recaudo"]
+                            .sum().rename(columns={"Total Recaudo": "Total_Ejecutado"}))
+            prog_det = (df_prog.groupby(det_cols, as_index=False)["Presupuesto Definitivo"]
+                            .sum().rename(columns={"Presupuesto Definitivo": "Total_Programado"}))
+            detalle  = pd.merge(prog_det, ejec_det, on=det_cols, how="left")
+            detalle["Total_Ejecutado"]    = detalle["Total_Ejecutado"].fillna(0)
+            detalle["Tasa_Ejecución (%)"] = ((detalle["Total_Ejecutado"] / detalle["Total_Programado"]) * 100).round(2).fillna(0)
+
+            # ----- Consolidado por clas_ofpuj (impuestos) -----------------------
+            ofp_cols = group_cols + ["clas_ofpuj"]
+            ejec_ofp = (df_ejec.groupby(ofp_cols, as_index=False)["Total Recaudo"]
+                            .sum().rename(columns={"Total Recaudo": "Total_Ejecutado"}))
+            prog_ofp = (df_prog.groupby(ofp_cols, as_index=False)["Presupuesto Definitivo"]
+                            .sum().rename(columns={"Presupuesto Definitivo": "Total_Programado"}))
+            ofpuj    = pd.merge(prog_ofp, ejec_ofp, on=ofp_cols, how="left")
+            ofpuj["Total_Ejecutado"]    = ofpuj["Total_Ejecutado"].fillna(0)
+            ofpuj["Tasa_Ejecución (%)"] = ((ofpuj["Total_Ejecutado"] / ofpuj["Total_Programado"]) * 100).round(2).fillna(0)
+
+            # ----- Totales generales --------------------------------------------
+            def tasas(df_sub):
+                p = df_sub["Total_Programado"].sum()
+                e = df_sub["Total_Ejecutado"].sum()
+                t = round(e / p * 100, 2) if p > 0 else 0
+                return p, e, t
+
+            p_gen,  e_gen,  t_gen  = tasas(tabla)
+            p_dep,  e_dep,  t_dep  = tasas(tabla[tabla["Tipo de Entidad"] == "Departamento"])
+            p_mun,  e_mun,  t_mun  = tasas(tabla[tabla["Tipo de Entidad"] == "Municipio"])
+
+            # =====================================================================
+            # PESTAÑAS INGRESOS
+            # =====================================================================
+            tab1, tab2, tab3 = st.tabs(["General", "Departamental", "Municipal"])
+
+            # ------------------------------------------------------------------
+            # TAB 1 – GENERAL
+            # ------------------------------------------------------------------
+            with tab1:
+                st.subheader("Ejecución Acumulada General")
+                col1, col2, col3 = st.columns(3)
+
+                for col, tasa, prog, ejec, titulo in [
+                    (col1, t_gen,  p_gen,  e_gen,  "Nacional"),
+                    (col2, t_dep,  p_dep,  e_dep,  "Departamentos"),
+                    (col3, t_mun,  p_mun,  e_mun,  "Municipios"),
+                ]:
+                    with col:
+                        st.plotly_chart(
+                            make_gauge(tasa, titulo, show_threshold=True),
+                            use_container_width=True,
+                            config={"displayModeBar": False},
+                        )
+                        st.caption(f"**Ejecutado / Programado:** {fmt_cop(ejec)} / {fmt_cop(prog)}")
+                        st.divider()
+                        if tasa > 100:
+                            st.metric("Sobreejecución", f"+{tasa-100:.1f}%",
+                                    f"+{fmt_cop(ejec-prog)}", delta_color="normal")
+                        else:
+                            st.metric("Falta por ejecutar", f"{100-tasa:.1f}%",
+                                    f"{fmt_cop(prog-ejec)} restantes", delta_color="inverse")
+
+            # ------------------------------------------------------------------
+            # TAB 2 – DEPARTAMENTAL
+            # ------------------------------------------------------------------
+            with tab2:
+                st.subheader("Nivel Departamental")
+                df_dep = tabla[tabla["Tipo de Entidad"] == "Departamento"].copy()
+
+                if df_dep.empty:
+                    st.info("No hay datos departamentales disponibles.")
+                else:
+                    entidad_sel = st.selectbox(
+                        "Selecciona Departamento",
+                        sorted(df_dep["Entidad"].unique()),
+                        key="ing_dep_sel",
+                    )
+                    row    = df_dep[df_dep["Entidad"] == entidad_sel].iloc[0]
+                    tasa   = row["Tasa_Ejecución (%)"]
+                    prog   = row["Total_Programado"]
+                    ejec   = row["Total_Ejecutado"]
+
+                    # — Gauge principal + métricas —
+                    col_gauge, col_metrics = st.columns([1.4, 1])
+                    with col_gauge:
+                        st.plotly_chart(
+                            make_gauge(tasa, "Tasa de ejecución total",
+                                    subtitle=f"Acumulado 2025 · {entidad_sel}",
+                                    show_threshold=True),
+                            use_container_width=True,
+                            config={"displayModeBar": False},
+                        )
+                        st.caption("**Ejecutado / Programado**")
+
+                    with col_metrics:
+                        st.markdown(tarjeta_metrica("Programado",  fmt_cop(prog),        "#185FA5"), unsafe_allow_html=True)
+                        st.markdown(tarjeta_metrica("Ejecutado",   fmt_cop(ejec),        "#1D9E75"), unsafe_allow_html=True)
+                        st.markdown(tarjeta_metrica("Rezago",      fmt_cop(prog - ejec), "#D85A30"), unsafe_allow_html=True)
+
+                    st.divider()
+
+                    # — Zona 2: Clasificación | Impuesto —
+                    col_clas, col_imp = st.columns(2)
+
+                    # ── Clasificación clas_gen2 (gauge individual) ──────────────
+                    with col_clas:
+                        st.markdown("### Ejecución por Clasificación")
+                        opciones_clas = ["Recursos propios", "Transferencias", "Recursos de capital"]
+                        clas_sel = st.selectbox(
+                            "Selecciona una clasificación",
+                            opciones_clas,
+                            key="ing_clas_dep",
+                        )
+                        df_c = detalle[
+                            (detalle["Entidad"] == entidad_sel) &
+                            (detalle["clas_gen2"] == clas_sel)
+                        ]
+                        if not df_c.empty:
+                            p_c = df_c["Total_Programado"].sum()
+                            e_c = df_c["Total_Ejecutado"].sum()
+                            t_c = round(e_c / p_c * 100, 2) if p_c > 0 else 0
+                            color_c = COLOR_CLAS.get(clas_sel, "#185FA5")
+                            st.plotly_chart(
+                                make_gauge(t_c, clas_sel, color=color_c, height=240, font_size=40),
+                                use_container_width=True,
+                                config={"displayModeBar": False},
+                            )
+                            st.caption(f"Ejecutado: **{fmt_cop(e_c)}** / Programado: **{fmt_cop(p_c)}**")
+                        else:
+                            st.info(f"Sin datos para {clas_sel}.")
+
+                    # ── Impuesto principal (gauge individual) ──────────────────
+                    with col_imp:
+                        st.markdown("### Impuestos Principales")
+                        opciones_imp_dep = ["Estampillas", "Sobretasa a la gasolina"]
+                        imp_sel = st.selectbox(
+                            "Selecciona un impuesto",
+                            opciones_imp_dep,
+                            key="ing_imp_dep",
+                        )
+                        mask   = ofpuj["clas_ofpuj"].str.contains(imp_sel, case=False, na=False)
+                        df_imp = ofpuj[(ofpuj["Entidad"] == entidad_sel) & mask]
+                        if not df_imp.empty:
+                            p_i = df_imp["Total_Programado"].sum()
+                            e_i = df_imp["Total_Ejecutado"].sum()
+                            t_i = round(e_i / p_i * 100, 2) if p_i > 0 else 0
+                            color_i = COLOR_IMP.get(imp_sel, "#185FA5")
+                            st.plotly_chart(
+                                make_gauge(t_i, imp_sel, color=color_i, height=240, font_size=40),
+                                use_container_width=True,
+                                config={"displayModeBar": False},
+                            )
+                            st.caption(f"Ejecutado: **{fmt_cop(e_i)}** / Programado: **{fmt_cop(p_i)}**")
+                        else:
+                            st.info(f"Sin datos para {imp_sel}.")
+
+                    st.divider()
+                    with st.expander("Ver tabla de detalle completa"):
+                        st.dataframe(tabla[tabla["Entidad"] == entidad_sel], use_container_width=True)
+
+            # ------------------------------------------------------------------
+            # TAB 3 – MUNICIPAL
+            # ------------------------------------------------------------------
+            with tab3:
+                st.subheader("Nivel Municipal")
+                df_mun_t = tabla[tabla["Tipo de Entidad"] == "Municipio"].copy()
+
+                if df_mun_t.empty:
+                    st.info("No hay datos municipales disponibles.")
+                else:
+                    deptos_mun = sorted(df_mun_t["Departamento"].unique())
+                    depto_sel  = st.selectbox("Selecciona un Departamento", deptos_mun, key="ing_mun_depto_sel")
+                    muns_lista = sorted(df_mun_t[df_mun_t["Departamento"] == depto_sel]["Entidad"].unique())
+                    entidad_sel = st.selectbox("Selecciona un Municipio", muns_lista, key="ing_mun_sel")
+
+                    row  = df_mun_t[df_mun_t["Entidad"] == entidad_sel].iloc[0]
+                    tasa = row["Tasa_Ejecución (%)"]
+                    prog = row["Total_Programado"]
+                    ejec = row["Total_Ejecutado"]
+
+                    # — Gauge principal + métricas —
+                    col_gauge, col_metrics = st.columns([1.4, 1])
+                    with col_gauge:
+                        st.plotly_chart(
+                            make_gauge(tasa, "Tasa de ejecución total",
+                                    subtitle=f"Acumulado 2025 · {entidad_sel}",
+                                    show_threshold=True),
+                            use_container_width=True,
+                            config={"displayModeBar": False},
+                        )
+                        st.caption("**Ejecutado / Programado**")
+
+                    with col_metrics:
+                        st.markdown(tarjeta_metrica("Programado",  fmt_cop(prog),        "#185FA5"), unsafe_allow_html=True)
+                        st.markdown(tarjeta_metrica("Ejecutado",   fmt_cop(ejec),        "#1D9E75"), unsafe_allow_html=True)
+                        st.markdown(tarjeta_metrica("Rezago",      fmt_cop(prog - ejec), "#D85A30"), unsafe_allow_html=True)
+
+                    st.divider()
+
+                    # — Zona 2: Clasificación | Impuesto —
+                    col_clas, col_imp = st.columns(2)
+
+                    # ── Clasificación clas_gen2 (gauge individual) ──────────────
+                    with col_clas:
+                        st.markdown("### Ejecución por Clasificación")
+                        opciones_clas = ["Recursos propios", "Transferencias", "Recursos de capital"]
+                        clas_sel = st.selectbox(
+                            "Selecciona una clasificación",
+                            opciones_clas,
+                            key="ing_clas_mun",
+                        )
+                        df_c = detalle[
+                            (detalle["Entidad"] == entidad_sel) &
+                            (detalle["clas_gen2"] == clas_sel)
+                        ]
+                        if not df_c.empty:
+                            p_c = df_c["Total_Programado"].sum()
+                            e_c = df_c["Total_Ejecutado"].sum()
+                            t_c = round(e_c / p_c * 100, 2) if p_c > 0 else 0
+                            color_c = COLOR_CLAS.get(clas_sel, "#185FA5")
+                            st.plotly_chart(
+                                make_gauge(t_c, clas_sel, color=color_c, height=240, font_size=40),
+                                use_container_width=True,
+                                config={"displayModeBar": False},
+                            )
+                            st.caption(f"Ejecutado: **{fmt_cop(e_c)}** / Programado: **{fmt_cop(p_c)}**")
+                        else:
+                            st.info(f"Sin datos para {clas_sel}.")
+
+                    # ── Impuesto principal (gauge individual) ──────────────────
+                    with col_imp:
+                        st.markdown("### Impuestos Principales")
+                        opciones_imp_mun = [
+                            "Impuesto predial unificado",
+                            "Impuesto de industria y comercio",
+                            "Sobretasa a la gasolina",
+                            "Estampillas",
+                        ]
+                        imp_sel = st.selectbox(
+                            "Selecciona un impuesto",
+                            opciones_imp_mun,
+                            key="ing_imp_mun",
+                        )
+                        # Máscara flexible según el impuesto
+                        if "predial" in imp_sel.lower():
+                            mask = ofpuj["clas_ofpuj"].str.contains("predial", case=False, na=False)
+                        elif "industria" in imp_sel.lower() or "comercio" in imp_sel.lower():
+                            mask = ofpuj["clas_ofpuj"].str.contains("industria|comercio|ICA", case=False, na=False)
+                        else:
+                            mask = ofpuj["clas_ofpuj"].str.contains(imp_sel, case=False, na=False)
+
+                        df_imp = ofpuj[(ofpuj["Entidad"] == entidad_sel) & mask]
+                        if not df_imp.empty:
+                            p_i = df_imp["Total_Programado"].sum()
+                            e_i = df_imp["Total_Ejecutado"].sum()
+                            t_i = round(e_i / p_i * 100, 2) if p_i > 0 else 0
+                            color_i = COLOR_IMP.get(imp_sel, "#185FA5")
+                            st.plotly_chart(
+                                make_gauge(t_i, imp_sel, color=color_i, height=240, font_size=40),
+                                use_container_width=True,
+                                config={"displayModeBar": False},
+                            )
+                            st.caption(f"Ejecutado: **{fmt_cop(e_i)}** / Programado: **{fmt_cop(p_i)}**")
+                        else:
+                            st.info(f"Sin datos para {imp_sel}.")
+
+                    st.divider()
+                    with st.expander("Ver tabla de detalle completa"):
+                        st.dataframe(tabla[tabla["Entidad"] == entidad_sel], use_container_width=True)
+
+        # =========================================================================
+        # TAB GASTOS 2025
+        # =========================================================================
+        with tab_gas:
+            st.header("Coyuntura de Gastos 2025")
+        
+            base_dir  = Path(__file__).parent
+            ejec_path = base_dir / "eje_gast_clean25.xlsx"
+            prog_path = base_dir / "pro_gast_clean25.xlsx"
+
+            @st.cache_data
+            def cargar_gastos():
+                df_eg = pd.read_excel(ejec_path)
+                df_pg = pd.read_excel(prog_path)
+                for df in [df_eg, df_pg]:
+                    df["Entidad"]         = df["Entidad"].astype(str).str.strip()
+                    df["Tipo de Entidad"] = df["Tipo de Entidad"].astype(str).str.strip()
+                    df["Departamento"]    = df["Departamento"].astype(str).str.strip()
+                return df_eg, df_pg
+
+            df_ejec_g, df_prog_g = cargar_gastos()
+
+            group_cols = ["Entidad", "Tipo de Entidad", "Departamento"]
+            ejec_agg_g = (df_ejec_g.groupby(group_cols, as_index=False)["Obligaciones"]
+                                .sum().rename(columns={"Obligaciones": "Total_Ejecutado"}))
+            prog_agg_g = (df_prog_g.groupby(group_cols, as_index=False)["Apropiación Definitiva"]
+                                .sum().rename(columns={"Apropiación Definitiva": "Total_Programado"}))
+            tabla_g = pd.merge(prog_agg_g, ejec_agg_g, on=group_cols, how="left")
+            tabla_g["Total_Ejecutado"]    = tabla_g["Total_Ejecutado"].fillna(0)
+            tabla_g["Tasa_Ejecución (%)"] = ((tabla_g["Total_Ejecutado"] / tabla_g["Total_Programado"]) * 100).round(2).fillna(0)
+
+            p_gen_g, e_gen_g, t_gen_g = tasas(tabla_g)
+            p_dep_g, e_dep_g, t_dep_g = tasas(tabla_g[tabla_g["Tipo de Entidad"] == "Departamento"])
+            p_mun_g, e_mun_g, t_mun_g = tasas(tabla_g[tabla_g["Tipo de Entidad"] == "Municipio"])
+
+            tab1g, tab2g, tab3g = st.tabs(["General", "Departamental", "Municipal"])
+
+            # ------------------------------------------------------------------
+            # GASTOS – TAB GENERAL
+            # ------------------------------------------------------------------
+            with tab1g:
+                st.subheader("Ejecución Acumulada General de Gastos")
+                col1, col2, col3 = st.columns(3)
+                for col, tasa, prog, ejec, titulo in [
+                    (col1, t_gen_g, p_gen_g, e_gen_g, "Nacional"),
+                    (col2, t_dep_g, p_dep_g, e_dep_g, "Departamentos"),
+                    (col3, t_mun_g, p_mun_g, e_mun_g, "Municipios"),
+                ]:
+                    with col:
+                        st.plotly_chart(
+                            make_gauge(tasa, titulo),
+                            use_container_width=True,
+                            config={"displayModeBar": False},
+                        )
+                        st.caption(f"**Obligaciones / Apropiación:** {fmt_cop(ejec)} / {fmt_cop(prog)}")
+
+            # ------------------------------------------------------------------
+            # GASTOS – TAB DEPARTAMENTAL
+            # ------------------------------------------------------------------
+            with tab2g:
+                st.subheader("Nivel Departamental")
+                df_dep_g = tabla_g[tabla_g["Tipo de Entidad"] == "Departamento"].copy()
+                if not df_dep_g.empty:
+                    entidad_sel = st.selectbox(
+                        "Selecciona Departamento",
+                        sorted(df_dep_g["Entidad"].unique()),
+                        key="gasto_dep_sel",
+                    )
+                    row = df_dep_g[df_dep_g["Entidad"] == entidad_sel].iloc[0]
+                    col_gauge, col_info = st.columns([1.4, 1])
+                    with col_gauge:
+                        st.plotly_chart(
+                            make_gauge(row["Tasa_Ejecución (%)"],
+                                    "Tasa de ejecución",
+                                    subtitle=f"Acumulado 2025 · {entidad_sel}"),
+                            use_container_width=True,
+                            config={"displayModeBar": False},
+                        )
+                    with col_info:
+                        st.markdown(tarjeta_metrica("Programado",           fmt_cop(row["Total_Programado"]),                     "#185FA5"), unsafe_allow_html=True)
+                        st.markdown(tarjeta_metrica("Ejecutado (Obl.)",     fmt_cop(row["Total_Ejecutado"]),                      "#1D9E75"), unsafe_allow_html=True)
+                        st.markdown(tarjeta_metrica("Por Ejecutar",         fmt_cop(row["Total_Programado"] - row["Total_Ejecutado"]), "#D85A30"), unsafe_allow_html=True)
+
+            # ------------------------------------------------------------------
+            # GASTOS – TAB MUNICIPAL
+            # ------------------------------------------------------------------
+            with tab3g:
+                st.subheader("Nivel Municipal")
+                df_mun_g = tabla_g[tabla_g["Tipo de Entidad"] == "Municipio"].copy()
+                if not df_mun_g.empty:
+                    depto_sel = st.selectbox(
+                        "Selecciona Departamento",
+                        sorted(df_mun_g["Departamento"].unique()),
+                        key="gasto_mun_depto",
+                    )
+                    muns_g    = sorted(df_mun_g[df_mun_g["Departamento"] == depto_sel]["Entidad"].unique())
+                    entidad_sel = st.selectbox("Selecciona Municipio", muns_g, key="gasto_mun_sel")
+                    row = df_mun_g[df_mun_g["Entidad"] == entidad_sel].iloc[0]
+                    col_gauge, col_info = st.columns([1.4, 1])
+                    with col_gauge:
+                        st.plotly_chart(
+                            make_gauge(row["Tasa_Ejecución (%)"],
+                                    "Tasa de ejecución",
+                                    subtitle=f"Acumulado 2025 · {entidad_sel}"),
+                            use_container_width=True,
+                            config={"displayModeBar": False},
+                        )
+                    with col_info:
+                        st.markdown(tarjeta_metrica("Programado",       fmt_cop(row["Total_Programado"]),                     "#185FA5"), unsafe_allow_html=True)
+                        st.markdown(tarjeta_metrica("Ejecutado (Obl.)", fmt_cop(row["Total_Ejecutado"]),                      "#1D9E75"), unsafe_allow_html=True)
+                        st.markdown(tarjeta_metrica("Por Ejecutar",     fmt_cop(row["Total_Programado"] - row["Total_Ejecutado"]), "#D85A30"), unsafe_allow_html=True)
+        
     
-   
 ##treemap
 elif menu == "Treemap":
            
     st.header("Treemap")
 
-#Presupuesto
-elif  menu=="Presupuesto actual":
-    st.header("Presupuesto actual")
+# =============================================================================
+# PRESUPUESTO ACTUAL — reemplazo del bloque elif menu == "Presupuesto actual"
+# =============================================================================
+
+elif menu == "Presupuesto actual":
+    st.header("Presupuesto actual 2025")
+
+    # -------------------------------------------------------------------------
+    # Carga de datos
+    # -------------------------------------------------------------------------
+    DATOS_LISTOS = False  # ← cambiar a True cuando el CIFFIT actualice
+
+    if not DATOS_LISTOS:
+        st.info(" Esperando actualización del CIFFIT.")
+    else:
+        base_dir  = Path(__file__).parent
+
+        @st.cache_data
+        def cargar_presupuesto():
+            df_ing  = pd.read_excel(base_dir / "pro_ing_clean25.xlsx")
+            df_gast = pd.read_excel(base_dir / "pro_gast_clean25.xlsx")
+
+            for df in [df_ing, df_gast]:
+                df["Entidad"]         = df["Entidad"].astype(str).str.strip()
+                df["Tipo de Entidad"] = df["Tipo de Entidad"].astype(str).str.strip()
+                df["Departamento"]    = df["Departamento"].astype(str).str.strip()
+
+            return df_ing, df_gast
+
+        df_ing, df_gast = cargar_presupuesto()
+
+        # -------------------------------------------------------------------------
+        # Helpers
+        # -------------------------------------------------------------------------
+        def fmt_cop(n):
+            """Formato COP legible."""
+            if n >= 1e12: return f"${n/1e12:.2f} B"
+            if n >= 1e9:  return f"${n/1e9:.1f} MM"
+            return f"${n/1e6:.0f} M"
+
+        def limpiar_path(df, cols):
+            """
+            Para treemaps: propaga hacia adelante los valores de la jerarquía
+            y descarta filas completamente vacías en la primera columna del path.
+            """
+            df = df.copy()
+            df[cols[0]] = df[cols[0]].fillna("Sin clasificar")
+            for i in range(1, len(cols)):
+                df[cols[i]] = df[cols[i]].fillna(df[cols[i - 1]])
+            return df
+
+        def estilo_treemap(fig):
+            """Estética uniforme para todos los treemaps."""
+            fig.update_layout(margin=dict(t=30, l=10, r=10, b=10))
+            fig.update_traces(
+                textinfo="label+percent entry",
+                textfont=dict(size=14, color="white"),
+                marker=dict(line=dict(width=3, color="white")),
+            )
+            return fig
+
+        def metrica_total(df, col_valor, label):
+            total = df[col_valor].sum()
+            st.metric(label, fmt_cop(total))
+
+        # =========================================================================
+        # TABS PRINCIPALES: Ingresos | Gastos
+        # =========================================================================
+        tab_ing_p, tab_gast_p = st.tabs([" Ingresos 2025", "Gastos 2025"])
+
+        # =========================================================================
+        # INGRESOS 2025
+        # =========================================================================
+        with tab_ing_p:
+            st.subheader("Programación de Ingresos 2025")
+
+            PATH_ING  = ["clas_ofpuj", "clas_gen1", "clas_gen2"]
+            COL_VAL_I = "Presupuesto Definitivo"
+
+            # Limpiar columnas de path
+            df_ing_clean = limpiar_path(df_ing, PATH_ING)
+            df_ing_clean["valor_mm"] = df_ing_clean[COL_VAL_I] / 1_000_000_000
+
+            # Sub-tabs territoriales
+            t_dep_i, t_mun_i = st.tabs(["Departamental", "Municipal"])
+
+            # ------------------------------------------------------------------
+            # INGRESOS – DEPARTAMENTAL
+            # ------------------------------------------------------------------
+            with t_dep_i:
+                df_dep_i = df_ing_clean[
+                    df_ing_clean["Tipo de Entidad"] == "Departamento"
+                ].copy()
+
+                deptos_i = sorted(df_dep_i["Departamento"].dropna().unique())
+                depto_sel_i = st.selectbox(
+                    "Selecciona un Departamento",
+                    deptos_i,
+                    key="pres_ing_depto"
+                )
+
+                df_fil_di = df_dep_i[df_dep_i["Departamento"] == depto_sel_i]
+
+                if df_fil_di.empty:
+                    st.warning("Sin datos para este departamento.")
+                else:
+                    metrica_total(df_fil_di, "valor_mm", f"Total Presupuesto · {depto_sel_i}")
+
+                    fig_i_dep = px.treemap(
+                        df_fil_di,
+                        path=PATH_ING,
+                        values="valor_mm",
+                        title=f"Composición del presupuesto de ingresos — {depto_sel_i}",
+                        color="clas_ofpuj",
+                    )
+                    st.plotly_chart(
+                        estilo_treemap(fig_i_dep),
+                        use_container_width=True,
+                        key="treemap_pres_ing_dep"
+                    )
+
+            # ------------------------------------------------------------------
+            # INGRESOS – MUNICIPAL
+            # ------------------------------------------------------------------
+            with t_mun_i:
+                df_mun_i = df_ing_clean[
+                    df_ing_clean["Tipo de Entidad"] == "Municipio"
+                ].copy()
+
+                deptos_mi = sorted(df_mun_i["Departamento"].dropna().unique())
+                depto_sel_mi = st.selectbox(
+                    "Selecciona un Departamento",
+                    deptos_mi,
+                    key="pres_ing_mun_depto"
+                )
+
+                muns_i = sorted(
+                    df_mun_i[df_mun_i["Departamento"] == depto_sel_mi]["Entidad"]
+                    .dropna().unique()
+                )
+                mun_sel_i = st.selectbox(
+                    "Selecciona un Municipio",
+                    muns_i,
+                    key="pres_ing_mun_ent"
+                )
+
+                df_fil_mi = df_mun_i[df_mun_i["Entidad"] == mun_sel_i]
+
+                if df_fil_mi.empty:
+                    st.warning("Sin datos para este municipio.")
+                else:
+                    metrica_total(df_fil_mi, "valor_mm", f"Total Presupuesto · {mun_sel_i}")
+
+                    fig_i_mun = px.treemap(
+                        df_fil_mi,
+                        path=PATH_ING,
+                        values="valor_mm",
+                        title=f"Composición del presupuesto de ingresos — {mun_sel_i}",
+                        color="clas_ofpuj",
+                    )
+                    st.plotly_chart(
+                        estilo_treemap(fig_i_mun),
+                        use_container_width=True,
+                        key="treemap_pres_ing_mun"
+                    )
+
+        # =========================================================================
+        # GASTOS 2025
+        # =========================================================================
+        with tab_gast_p:
+            st.subheader("Programación de Gastos 2025")
+
+            # Definir columnas de profundidad disponibles en gastos
+            # col_1 existe solo en gastos; se usa como raíz de la jerarquía
+            COLS_GASTO_RAW = ["col_1", "col_2", "col_3", "col_4", "col_5", "col_6"]
+            COL_VAL_G = "Apropiación Definitiva"
+
+            # Detectar cuáles columnas de path realmente existen en el archivo
+            PATH_GAST = [c for c in COLS_GASTO_RAW if c in df_gast.columns]
+
+            df_gast_clean = limpiar_path(df_gast, PATH_GAST)
+            df_gast_clean["valor_mm"] = df_gast_clean[COL_VAL_G] / 1_000_000_000
+
+            # Sub-tabs territoriales
+            t_dep_g, t_mun_g = st.tabs(["Departamental", "Municipal"])
+
+            # ------------------------------------------------------------------
+            # GASTOS – DEPARTAMENTAL
+            # ------------------------------------------------------------------
+            with t_dep_g:
+                df_dep_g = df_gast_clean[
+                    df_gast_clean["Tipo de Entidad"] == "Departamento"
+                ].copy()
+
+                deptos_g = sorted(df_dep_g["Departamento"].dropna().unique())
+                depto_sel_g = st.selectbox(
+                    "Selecciona un Departamento",
+                    deptos_g,
+                    key="pres_gast_depto"
+                )
+
+                df_fil_dg = df_dep_g[df_dep_g["Departamento"] == depto_sel_g]
+
+                if df_fil_dg.empty:
+                    st.warning("Sin datos para este departamento.")
+                else:
+                    metrica_total(df_fil_dg, "valor_mm", f"Total Apropiación · {depto_sel_g}")
+
+                    fig_g_dep = px.treemap(
+                        df_fil_dg,
+                        path=PATH_GAST,
+                        values="valor_mm",
+                        title=f"Composición del presupuesto de gastos — {depto_sel_g}",
+                        color="col_1",
+                    )
+                    st.plotly_chart(
+                        estilo_treemap(fig_g_dep),
+                        use_container_width=True,
+                        key="treemap_pres_gast_dep"
+                    )
+
+            # ------------------------------------------------------------------
+            # GASTOS – MUNICIPAL
+            # ------------------------------------------------------------------
+            with t_mun_g:
+                df_mun_g = df_gast_clean[
+                    df_gast_clean["Tipo de Entidad"] == "Municipio"
+                ].copy()
+
+                deptos_mg = sorted(df_mun_g["Departamento"].dropna().unique())
+                depto_sel_mg = st.selectbox(
+                    "Selecciona un Departamento",
+                    deptos_mg,
+                    key="pres_gast_mun_depto"
+                )
+
+                muns_g = sorted(
+                    df_mun_g[df_mun_g["Departamento"] == depto_sel_mg]["Entidad"]
+                    .dropna().unique()
+                )
+                mun_sel_g = st.selectbox(
+                    "Selecciona un Municipio",
+                    muns_g,
+                    key="pres_gast_mun_ent"
+                )
+
+                df_fil_mg = df_mun_g[df_mun_g["Entidad"] == mun_sel_g]
+
+                if df_fil_mg.empty:
+                    st.warning("Sin datos para este municipio.")
+                else:
+                    metrica_total(df_fil_mg, "valor_mm", f"Total Apropiación · {mun_sel_g}")
+
+                    fig_g_mun = px.treemap(
+                        df_fil_mg,
+                        path=PATH_GAST,
+                        values="valor_mm",
+                        title=f"Composición del presupuesto de gastos — {mun_sel_g}",
+                        color="col_1",
+                    )
+                    st.plotly_chart(
+                        estilo_treemap(fig_g_mun),
+                        use_container_width=True,
+                        key="treemap_pres_gast_mun"
+                    )
 
 #Descargas
-elif  menu=="Descarga datos":
-    st.header("Descarga datos")
+elif menu == "Descarga de datos":
+    st.header("Descarga de datos")
+
+    base_dir = Path(__file__).parent
+
+    @st.cache_data
+    def convertir_xlsx(ruta_parquet):
+        df = pd.read_parquet(ruta_parquet)
+        buffer = BytesIO()
+        df.to_excel(buffer, index=False, engine="openpyxl")
+        buffer.seek(0)
+        return buffer.getvalue()
+
+    datasets = [
+        {
+            "titulo":   "Ingresos territoriales",
+            "archivo":  base_dir / "data" / "ingresos_ipc_pop.parquet",
+            "nombre":   "ingresos_ipc_pop.xlsx",
+            "boton":    "Descargar datos completos (xlsx)",
+        },
+        {
+            "titulo":   "Gastos territoriales",
+            "archivo":  base_dir / "data" / "ejecucion_deflactada_mun.parquet",
+            "nombre":   "ejecucion_deflactada_mun.xlsx",
+            "boton":    "Descargar datos completos (xlsx)",
+        },
+        {
+            "titulo":   "Sistema General de Participaciones (SGP)",
+            "archivo":  base_dir / "data" / "datos_sgp_pib_ic.parquet",
+            "nombre":   "datos_sgp_pib_ic.xlsx",
+            "boton":    "Descargar datos completos (xlsx)",
+        },
+    ]
+
+    for ds in datasets:
+        st.subheader(ds["titulo"])
+        if ds["archivo"].exists():
+            datos_xlsx = convertir_xlsx(ds["archivo"])
+            st.download_button(
+                label=ds["boton"],
+                data=datos_xlsx,
+                file_name=ds["nombre"],
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=ds["nombre"],
+            )
+        else:
+            st.warning(f"Archivo no disponible: {ds['archivo'].name}")
+        st.divider()
